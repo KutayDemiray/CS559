@@ -9,3 +9,4 @@ test*
 exp_local/*
 *.png
 encoder_pretrained/*
+.vscode/launch.json
