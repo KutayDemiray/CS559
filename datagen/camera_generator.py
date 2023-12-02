@@ -7,8 +7,8 @@ goal_pos = np.array(
 )  # euler = 0 0 0 durumunda aşağı bakıyor. ilerisi y, yukarısı z, sağ taraf x
 poses = np.zeros((100, 4, 4))
 
-with open("./test.txt", "w") as the_file:
-    for i in range(3):
+with open("./test2.txt", "w") as the_file:
+    for i in range(10):
         posx = random.randrange(-300, 300) / 100
         posy = random.randrange(-300, 300) / 100
         posz = random.randrange(0, 30) / 10
