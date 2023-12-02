@@ -28,7 +28,15 @@ from datetime import datetime
 
 parser = argparse.ArgumentParser()
 # environment
-parser.add_argument("--env_name", default="window-open-v2")
+parser.add_argument(
+    "--env_name",
+    choices=[
+        "drawer-open-v2",
+        "hammer-v2",
+        "soccer-v2",
+        "window-open-v2",
+    ],  # tasks used in snerl
+)
 parser.add_argument(
     "--save_mode", choices=["rgb_array", "rgbd", "rgbd_segmentation_array", "human"]
 )  # rgb_array returns rgb + d + seg (cursed)
@@ -41,13 +49,6 @@ parser.add_argument("--timestep_freq", default=1)
 parser.add_argument("--img_size", default=480, type=int)
 
 args = parser.parse_args()
-
-valid_tasks = [
-    "window-open-v2",
-    "drawer-open-v2",
-    "hammer-v2",
-    "soccer-v2",
-]  # tasks used in snerl
 
 args.save_mode = args.save_mode
 task_name = args.env_name
@@ -62,7 +63,6 @@ timestep_freq = int(args.timestep_freq)
 
 print(args)
 
-assert task_name in valid_tasks, "task name not in valid tasks"
 
 ml1 = metaworld.ML1(task_name)  # Construct the benchmark, sampling tasks
 
