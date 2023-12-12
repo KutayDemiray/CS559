@@ -9,23 +9,28 @@ import random
 import time
 import json
 import copy
-import datetime
+
+from datetime import datetime
 
 import utils
 from logger import Logger
 from video import VideoRecorder
 
 from curl_sac import CurlSacAgent
-from torchvision import transforms
+from torchvision import transforms as T
+import torch.nn.functional as F
 from env_wrapper import EnvWrapper
+from encoder import make_encoder
+from distillation import Distillation
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     # environment
     parser.add_argument("--env_name", default="window-open-v2")
-    parser.add_argument("--n_eps", default=30, type=int)
+    parser.add_argument("--n_eps", default=120, type=int)
     parser.add_argument("--n_timesteps", default=120, type=int)
+    parser.add_argument("--n_channels", default=3, type=int)
     parser.add_argument("--pre_transform_image_size", default=128, type=int)
     parser.add_argument("--camera_name", nargs="*", default=None)
     parser.add_argument("--multicam_contrastive", default=False, action="store_true")
@@ -86,7 +91,13 @@ def parse_args():
     parser.add_argument("--detach_encoder", default=False, action="store_true")
     parser.add_argument("--suffix", default=None, type=str)
 
+    # random/encoder network distillation
+    parser.add_argument("--distillation", default="", choices=["", "random", "encoder"])
+    parser.add_argument("--distillation_scale", default=1, type=int)
+    parser.add_argument("--distillation_lr", default=1e-3, type=float)
+
     parser.add_argument("--log_interval", default=100, type=int)
+
     args = parser.parse_args()
     return args
 
@@ -100,6 +111,9 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         total_success = 0
         for i in range(num_episodes):
             obs = env.reset()
+            obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                9 * args.frame_stack, 128, 128
+            )
             video.init(enabled=(i == 0))
             done = False
             episode_reward = 0
@@ -110,13 +124,20 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
                         obs = utils.sample_view_from_multiview(
                             obs, args.multiview, rl=True, frame_stack=args.frame_stack
                         )
+
                     obs = utils.center_crop_image(obs, args.image_size)
+
                 with utils.eval_mode(agent):
                     if sample_stochastically:
+                        # print("random action obs", obs.shape)
                         action = agent.sample_action(obs)
                     else:
+                        # print("action obs", obs.shape)
                         action = agent.select_action(obs)
                 obs, reward, done, info = env.step(action)
+                obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                    9 * args.frame_stack, 128, 128
+                )
                 video.record(env, obs)
                 episode_reward += reward
             total_success += info["success"]
@@ -179,6 +200,7 @@ def make_agent(obs_shape, action_shape, args, device):
 
 def main():
     args = parse_args()
+    print(args)
     if args.env_name == "drawer-close-v2" or args.env_name == "hammer-v2":
         args.stddev_schedule = "linear(1.0,0.1,100000)"
         args.stddev_clip = 0.1
@@ -202,6 +224,7 @@ def main():
         multicam_contrastive=args.multicam_contrastive,
         sparse_reward=args.sparse,
         device=device,
+        snerl_cam_names=args.camera_name,
     )
 
     env.seed(args.seed)
@@ -211,7 +234,7 @@ def main():
         env = utils.FrameStack(env, k=args.frame_stack)
 
     # make directory
-    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     env_name = args.env_name
     exp_name = (
         env_name
@@ -251,8 +274,11 @@ def main():
         multicam_contrastive=args.multicam_contrastive,
     )
 
+    if not os.path.exists(args.work_dir):
+        os.mkdir(args.work_dir)
+
     with open(os.path.join(args.work_dir, "args.json"), "w") as f:
-        print(args.work_dir)
+        # print(args.work_dir)
         if not os.path.exists(args.work_dir):
             pass  # mkdir
         json.dump(vars(args), f, sort_keys=True, indent=4)
@@ -322,21 +348,85 @@ def main():
         obs_shape=obs_shape, action_shape=action_shape, args=args, device=device
     )
 
+    if args.distillation != "":
+        if args.distillation == "random":
+            distillation = Distillation(obs_shape, target_net=None, args=args)
+        elif args.distillation == "encoder":
+            distillation = Distillation(
+                obs_shape, target_net=agent.actor.encoder, args=args
+            )
+
+        distillation.predictor_net.cuda()
+        distillation.target_net.cuda()
+
+        """
+        distillation_predictor = make_encoder(
+            args.encoder_type,
+            obs_shape,
+            args.encoder_feature_dim,
+            args.num_layers,
+            args.num_filters,
+            output_logits=False,
+            multiview=args.multiview,
+            frame_stack=args.frame_stack,
+            encoder_name=args.encoder_name,
+            finetune_encoder=args.finetune_encoder,
+            log_encoder=False,
+            env_name=env_name,
+        )
+
+        if args.distillation == "random":
+            distillation_target = make_encoder(
+                args.encoder_type,
+                obs_shape,
+                args.encoder_feature_dim,
+                args.num_layers,
+                args.num_filters,
+                output_logits=False,
+                multiview=args.multiview,
+                frame_stack=args.frame_stack,
+                encoder_name=args.encoder_name,
+                finetune_encoder=args.finetune_encoder,
+                log_encoder=False,
+                env_name=env_name,
+            )
+        elif args.distillation == "encoder":
+            distillation_target = agent.actor.encoder
+
+        predictor_optim = torch.optim.Adam(
+            distillation_predictor.parameters(), lr=args.distillation_lr
+        )
+
+        distillation_predictor.cuda()
+        distillation_target.cuda()
+        """
+
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
 
     for step in range(args.num_train_steps):
+        """
+        if step % 100 == 0:
+            ts = datetime.timestamp(datetime.now())
+            ts = datetime.fromtimestamp(ts)
+            print(f"[{ts}] Step {step}")
+        """
         # evaluate agent periodically
-
         if step % args.eval_freq == 0:
+            ts = datetime.timestamp(datetime.now())
+            ts = datetime.fromtimestamp(ts)
+            print(f"[{ts}] Eval begin at step {step}")
             L.log("eval/episode", episode, step)
             evaluate(env, agent, video, args.num_eval_episodes, L, step, args)
             if args.save_model and args.encoder_type == "pixel":
                 agent.save_curl(model_dir, step)
             if args.save_buffer:
                 replay_buffer.save(buffer_dir)
+            ts = datetime.timestamp(datetime.now())
+            ts = datetime.fromtimestamp(ts)
+            print(f"[{ts}] Eval end")
 
         if done:
             if step > 0:
@@ -348,7 +438,15 @@ def main():
             if step % args.log_interval == 0:
                 L.log("train/episode_reward", episode_reward, step)
 
+            ts = datetime.timestamp(datetime.now())
+            ts = datetime.fromtimestamp(ts)
+            print(f"[{ts}] Step {step}: Episode ended with reward {episode_reward}")
+
             obs = env.reset()
+            obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                (9 * args.frame_stack, 128, 128)
+            )
+            # print("obs", obs)
             done = False
             episode_reward = 0
             episode_step = 0
@@ -377,10 +475,27 @@ def main():
                 agent.update(replay_buffer, L, step)
 
         next_obs, reward, done, info = env.step(action)
+        # print("next obs", next_obs.shape) 9x480x480
+        next_obs = F.interpolate(next_obs[None, ...], (128, 128)).view(
+            (9 * args.frame_stack, 128, 128)
+        )  # 9x128x128
+
+        obs = F.interpolate(obs[None, ...], (128, 128)).view(
+            (9 * args.frame_stack, 128, 128)
+        )
+
+        # add exploration reward if we're doing random/encoder network distillation
+        if args.distillation != "":
+            distillation_loss = distillation.step(obs)
+
+            print("distillation loss:", distillation_loss)
+            reward += args.distillation_scale * distillation_loss
 
         # allow infinit bootstrap
         done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(done)
         episode_reward += reward
+
+        # print("after interp", obs.shape)
         replay_buffer.add(obs, action, reward, next_obs, done_bool, episode_step)
 
         obs = next_obs

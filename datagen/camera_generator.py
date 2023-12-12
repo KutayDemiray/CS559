@@ -9,9 +9,9 @@ poses = np.zeros((100, 4, 4))
 
 with open("./test2.txt", "w") as the_file:
     for i in range(10):
-        posx = random.randrange(-300, 300) / 100
-        posy = random.randrange(-300, 300) / 100
-        posz = random.randrange(0, 30) / 10
+        posx = random.randrange(-100, 100) / 100
+        posy = random.randrange(-100, 100) / 100 + 0.5
+        posz = random.randrange(0, 20) / 10 + 0.5
         # pos = np.array([posx, posy, posz])
 
         # r = - pos + goal_pos - np.array([0, 0, -1])

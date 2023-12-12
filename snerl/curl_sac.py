@@ -40,55 +40,80 @@ def weight_init(m):
         m.weight.data.fill_(0.0)
         m.bias.data.fill_(0.0)
         mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain('relu')
+        gain = nn.init.calculate_gain("relu")
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
 class Actor(nn.Module):
     """MLP actor network."""
+
     def __init__(
-        self, obs_shape, action_shape, hidden_dim, encoder_type,
-        encoder_feature_dim, log_std_min, log_std_max, num_layers, num_filters, multiview = None, \
-        frame_stack = None, encoder_name = None, finetune_encoder =False, env_name = None
+        self,
+        obs_shape,
+        action_shape,
+        hidden_dim,
+        encoder_type,
+        encoder_feature_dim,
+        log_std_min,
+        log_std_max,
+        num_layers,
+        num_filters,
+        multiview=None,
+        frame_stack=None,
+        encoder_name=None,
+        finetune_encoder=False,
+        env_name=None,
     ):
         super().__init__()
 
         self.encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers,
-            num_filters, output_logits=False, multiview = multiview, frame_stack = frame_stack, encoder_name = encoder_name,
-            finetune_encoder = finetune_encoder, log_encoder = False, env_name = env_name
+            encoder_type,
+            obs_shape,
+            encoder_feature_dim,
+            num_layers,
+            num_filters,
+            output_logits=False,
+            multiview=multiview,
+            frame_stack=frame_stack,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            log_encoder=False,
+            env_name=env_name,
         )
+
+        self.encoder.cuda()
 
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
 
         self.trunk = nn.Sequential(
-            nn.Linear(self.encoder.feature_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * action_shape[0])
+            nn.Linear(self.encoder.feature_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 2 * action_shape[0]),
         )
 
         self.outputs = dict()
-        if encoder_type=='nerf' and encoder_name != 'from_scratch':
+        if encoder_type == "nerf" and encoder_name != "from_scratch":
             self.trunk.apply(weight_init)
         else:
             self.apply(weight_init)
 
-    def forward(
-        self, obs, compute_pi=True, compute_log_pi=True, detach_encoder=False
-    ):
+    def forward(self, obs, compute_pi=True, compute_log_pi=True, detach_encoder=False):
         obs = self.encoder(obs, detach=detach_encoder)
-
+        # print(type(self.trunk(obs))) tensor
+        # raise Exception()
         mu, log_std = self.trunk(obs).chunk(2, dim=-1)
 
         # constrain log_std inside [log_std_min, log_std_max]
         log_std = torch.tanh(log_std)
-        log_std = self.log_std_min + 0.5 * (
-            self.log_std_max - self.log_std_min
-        ) * (log_std + 1)
+        log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (
+            log_std + 1
+        )
 
-        self.outputs['mu'] = mu
-        self.outputs['std'] = log_std.exp()
+        self.outputs["mu"] = mu
+        self.outputs["std"] = log_std.exp()
 
         if compute_pi:
             std = log_std.exp()
@@ -112,22 +137,25 @@ class Actor(nn.Module):
             return
 
         for k, v in self.outputs.items():
-            L.log_histogram('train_actor/%s_hist' % k, v, step)
+            L.log_histogram("train_actor/%s_hist" % k, v, step)
 
-        L.log_param('train_actor/fc1', self.trunk[0], step)
-        L.log_param('train_actor/fc2', self.trunk[2], step)
-        L.log_param('train_actor/fc3', self.trunk[4], step)
+        L.log_param("train_actor/fc1", self.trunk[0], step)
+        L.log_param("train_actor/fc2", self.trunk[2], step)
+        L.log_param("train_actor/fc3", self.trunk[4], step)
 
 
 class QFunction(nn.Module):
     """MLP for q-function."""
+
     def __init__(self, obs_dim, action_dim, hidden_dim):
         super().__init__()
 
         self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(obs_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
         )
 
     def forward(self, obs, action):
@@ -139,29 +167,48 @@ class QFunction(nn.Module):
 
 class Critic(nn.Module):
     """Critic network, employes two q-functions."""
+
     def __init__(
-        self, obs_shape, action_shape, hidden_dim, encoder_type,
-        encoder_feature_dim, num_layers, num_filters, multiview = None, frame_stack = None, \
-        log_encoder = False, encoder_name = None, finetune_encoder =False, env_name = None
+        self,
+        obs_shape,
+        action_shape,
+        hidden_dim,
+        encoder_type,
+        encoder_feature_dim,
+        num_layers,
+        num_filters,
+        multiview=None,
+        frame_stack=None,
+        log_encoder=False,
+        encoder_name=None,
+        finetune_encoder=False,
+        env_name=None,
     ):
         super().__init__()
 
         self.log_encoder = log_encoder
         self.encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers,
-            num_filters, output_logits=True, multiview = multiview, frame_stack = frame_stack, encoder_name = encoder_name,
-            finetune_encoder = finetune_encoder, log_encoder = log_encoder, env_name = env_name
+            encoder_type,
+            obs_shape,
+            encoder_feature_dim,
+            num_layers,
+            num_filters,
+            output_logits=True,
+            multiview=multiview,
+            frame_stack=frame_stack,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            log_encoder=log_encoder,
+            env_name=env_name,
         )
 
-        self.Q1 = QFunction(
-            self.encoder.feature_dim, action_shape[0], hidden_dim
-        )
-        self.Q2 = QFunction(
-            self.encoder.feature_dim, action_shape[0], hidden_dim
-        )
+        self.encoder.cuda()
+
+        self.Q1 = QFunction(self.encoder.feature_dim, action_shape[0], hidden_dim)
+        self.Q2 = QFunction(self.encoder.feature_dim, action_shape[0], hidden_dim)
         self.encoder_type = encoder_type
         self.outputs = dict()
-        if encoder_type=='nerf' and encoder_name != 'from_scratch':
+        if encoder_type == "nerf" and encoder_name != "from_scratch":
             self.Q1.apply(weight_init)
             self.Q2.apply(weight_init)
         else:
@@ -174,8 +221,8 @@ class Critic(nn.Module):
         q1 = self.Q1(obs, action)
         q2 = self.Q2(obs, action)
 
-        self.outputs['q1'] = q1
-        self.outputs['q2'] = q2
+        self.outputs["q1"] = q1
+        self.outputs["q2"] = q2
 
         return q1, q2
 
@@ -187,11 +234,11 @@ class Critic(nn.Module):
             self.encoder.log(L, step, log_freq)
 
         for k, v in self.outputs.items():
-            L.log_histogram('train_critic/%s_hist' % k, v, step)
+            L.log_histogram("train_critic/%s_hist" % k, v, step)
 
         for i in range(3):
-            L.log_param('train_critic/q1_fc%d' % i, self.Q1.trunk[i * 2], step)
-            L.log_param('train_critic/q2_fc%d' % i, self.Q2.trunk[i * 2], step)
+            L.log_param("train_critic/q1_fc%d" % i, self.Q1.trunk[i * 2], step)
+            L.log_param("train_critic/q2_fc%d" % i, self.Q2.trunk[i * 2], step)
 
 
 class CURL(nn.Module):
@@ -199,13 +246,21 @@ class CURL(nn.Module):
     CURL
     """
 
-    def __init__(self, obs_shape, z_dim, batch_size, critic, critic_target, output_type="continuous"):
+    def __init__(
+        self,
+        obs_shape,
+        z_dim,
+        batch_size,
+        critic,
+        critic_target,
+        output_type="continuous",
+    ):
         super(CURL, self).__init__()
         self.batch_size = batch_size
 
         self.encoder = critic.encoder
 
-        self.encoder_target = critic_target.encoder 
+        self.encoder_target = critic_target.encoder
 
         self.W = nn.Parameter(torch.rand(z_dim, z_dim))
         self.output_type = output_type
@@ -239,8 +294,10 @@ class CURL(nn.Module):
         logits = logits - torch.max(logits, 1)[0][:, None]
         return logits
 
+
 class CurlSacAgent(object):
     """CURL representation learning with SAC."""
+
     def __init__(
         self,
         obs_shape,
@@ -260,7 +317,7 @@ class CurlSacAgent(object):
         critic_beta=0.9,
         critic_tau=0.005,
         critic_target_update_freq=2,
-        encoder_type='pixel',
+        encoder_type="pixel",
         encoder_feature_dim=50,
         encoder_lr=1e-3,
         encoder_tau=0.005,
@@ -270,12 +327,12 @@ class CurlSacAgent(object):
         log_interval=100,
         detach_encoder=False,
         curl_latent_dim=128,
-        multicam_contrastive = False,
-        multiview = 3,
-        frame_stack = 3,
-        log_encoder = False,
-        finetune_encoder = False,
-        encoder_name = None,
+        multicam_contrastive=False,
+        multiview=3,
+        frame_stack=3,
+        log_encoder=False,
+        finetune_encoder=False,
+        encoder_name=None,
         no_cpc=False,
         env_name=None,
     ):
@@ -300,28 +357,58 @@ class CurlSacAgent(object):
         self.no_cpc = no_cpc
         print("make actor")
         self.actor = Actor(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, actor_log_std_min, actor_log_std_max,
-            num_layers, num_filters, multiview, frame_stack,
-            encoder_name=encoder_name, finetune_encoder=finetune_encoder, env_name = env_name
+            obs_shape,
+            action_shape,
+            hidden_dim,
+            encoder_type,
+            encoder_feature_dim,
+            actor_log_std_min,
+            actor_log_std_max,
+            num_layers,
+            num_filters,
+            multiview,
+            frame_stack,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            env_name=env_name,
         ).to(device)
         print("make critic")
         self.critic = Critic(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, num_layers, num_filters, multiview, frame_stack, 
-            log_encoder=log_encoder, encoder_name=encoder_name, finetune_encoder=finetune_encoder, env_name = env_name
+            obs_shape,
+            action_shape,
+            hidden_dim,
+            encoder_type,
+            encoder_feature_dim,
+            num_layers,
+            num_filters,
+            multiview,
+            frame_stack,
+            log_encoder=log_encoder,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            env_name=env_name,
         ).to(device)
         print("make critic target")
         self.critic_target = Critic(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, num_layers, num_filters, multiview, frame_stack,
-            log_encoder=False, encoder_name=encoder_name, finetune_encoder=finetune_encoder, env_name = env_name
+            obs_shape,
+            action_shape,
+            hidden_dim,
+            encoder_type,
+            encoder_feature_dim,
+            num_layers,
+            num_filters,
+            multiview,
+            frame_stack,
+            log_encoder=False,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            env_name=env_name,
         ).to(device)
 
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # tie encoders between actor and critic, and CURL and critic
-        if ('nerf' not in self.encoder_type) or (self.finetune_encoder):
+        if ("nerf" not in self.encoder_type) or (self.finetune_encoder):
             print("$$$$$$$ train or finetune encoder $$$$$$$")
             self.actor.encoder.copy_conv_weights_from(self.critic.encoder)
 
@@ -329,21 +416,35 @@ class CurlSacAgent(object):
         self.log_alpha.requires_grad = True
         # set target entropy to -|A|
         self.target_entropy = -np.prod(action_shape)
-        
-        if self.encoder_type == 'nerf':
+
+        if self.encoder_type == "nerf":
             import itertools
+
             # optimizers
-            actor_params = [self.actor.trunk.parameters(), self.actor.encoder.fc.parameters(), \
-                self.actor.encoder.mlp1.parameters(), self.actor.encoder.mlp2.parameters(), self.actor.encoder.ln.parameters()]
+            actor_params = [
+                self.actor.trunk.parameters(),
+                self.actor.encoder.fc.parameters(),
+                self.actor.encoder.mlp1.parameters(),
+                self.actor.encoder.mlp2.parameters(),
+                self.actor.encoder.ln.parameters(),
+            ]
             self.actor_optimizer = torch.optim.Adam(
                 itertools.chain(*actor_params), lr=actor_lr, betas=(actor_beta, 0.999)
             )
-            critic_params = [self.critic.Q1.parameters(), self.critic.Q2.parameters(), self.critic.encoder.fc.parameters(), \
-                self.critic.encoder.mlp1.parameters(), self.critic.encoder.mlp2.parameters(), self.critic.encoder.ln.parameters()]
+            critic_params = [
+                self.critic.Q1.parameters(),
+                self.critic.Q2.parameters(),
+                self.critic.encoder.fc.parameters(),
+                self.critic.encoder.mlp1.parameters(),
+                self.critic.encoder.mlp2.parameters(),
+                self.critic.encoder.ln.parameters(),
+            ]
             self.critic_optimizer = torch.optim.Adam(
-                itertools.chain(*critic_params), lr=critic_lr, betas=(critic_beta, 0.999)
+                itertools.chain(*critic_params),
+                lr=critic_lr,
+                betas=(critic_beta, 0.999),
             )
-    
+
             self.log_alpha_optimizer = torch.optim.Adam(
                 [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
             )
@@ -361,19 +462,23 @@ class CurlSacAgent(object):
                 [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
             )
 
-        if self.encoder_type == 'pixel' and not self.no_cpc:
+        if self.encoder_type == "pixel" and not self.no_cpc:
             # create CURL encoder (the 128 batch size is probably unnecessary)
-            self.CURL = CURL(obs_shape, encoder_feature_dim,
-                        self.curl_latent_dim, self.critic,self.critic_target, output_type='continuous').to(self.device)
+            self.CURL = CURL(
+                obs_shape,
+                encoder_feature_dim,
+                self.curl_latent_dim,
+                self.critic,
+                self.critic_target,
+                output_type="continuous",
+            ).to(self.device)
 
             # optimizer for critic encoder for reconstruction loss
             self.encoder_optimizer = torch.optim.Adam(
                 self.critic.encoder.parameters(), lr=encoder_lr
             )
 
-            self.cpc_optimizer = torch.optim.Adam(
-                self.CURL.parameters(), lr=encoder_lr
-            )
+            self.cpc_optimizer = torch.optim.Adam(self.CURL.parameters(), lr=encoder_lr)
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
         self.train()
@@ -383,7 +488,7 @@ class CurlSacAgent(object):
         self.training = training
         self.actor.train(training)
         self.critic.train(training)
-        if self.encoder_type == 'pixel' and not self.no_cpc:
+        if self.encoder_type == "pixel" and not self.no_cpc:
             self.CURL.train(training)
 
     @property
@@ -392,25 +497,25 @@ class CurlSacAgent(object):
 
     def select_action(self, obs):
         with torch.no_grad():
-            if isinstance(obs, torch.Tensor): 
-                obs =  obs.type(torch.float32)
+            if isinstance(obs, torch.Tensor):
+                obs = obs.type(torch.float32)
             else:
                 obs = torch.FloatTensor(obs).to(self.device)
             obs = obs.unsqueeze(0)
-            mu, _, _, _ = self.actor(
-                obs, compute_pi=False, compute_log_pi=False
-            )
+            mu, _, _, _ = self.actor(obs, compute_pi=False, compute_log_pi=False)
             return mu.cpu().data.numpy().flatten()
 
-    def sample_action(self, obs):     
+    def sample_action(self, obs):
         if obs.shape[-1] != self.image_size:
             if self.multicam_contrastive:
-                obs = utils.sample_view_from_multiview(obs, self.multiview, rl = True, frame_stack= self.frame_stack)
+                obs = utils.sample_view_from_multiview(
+                    obs, self.multiview, rl=True, frame_stack=self.frame_stack
+                )
             obs = utils.center_crop_image(obs, self.image_size)
- 
+
         with torch.no_grad():
-            if isinstance(obs, torch.Tensor): 
-                obs =  obs.type(torch.float32)
+            if isinstance(obs, torch.Tensor):
+                obs = obs.type(torch.float32)
             else:
                 obs = torch.FloatTensor(obs).to(self.device)
             obs = obs.unsqueeze(0)
@@ -421,18 +526,18 @@ class CurlSacAgent(object):
         with torch.no_grad():
             _, policy_action, log_pi, _ = self.actor(next_obs)
             target_Q1, target_Q2 = self.critic_target(next_obs, policy_action)
-            target_V = torch.min(target_Q1,
-                                 target_Q2) - self.alpha.detach() * log_pi
+            target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_pi
             target_Q = reward + (not_done * self.discount * target_V)
 
         # get current Q estimates
         current_Q1, current_Q2 = self.critic(
-            obs, action, detach_encoder=self.detach_encoder)
-        critic_loss = F.mse_loss(current_Q1,
-                                 target_Q) + F.mse_loss(current_Q2, target_Q)
+            obs, action, detach_encoder=self.detach_encoder
+        )
+        critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(
+            current_Q2, target_Q
+        )
         if step % self.log_interval == 0:
-            L.log('train_critic/loss', critic_loss, step)
-
+            L.log("train_critic/loss", critic_loss, step)
 
         # Optimize the critic
         self.critic_optimizer.zero_grad()
@@ -450,12 +555,13 @@ class CurlSacAgent(object):
         actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
         if step % self.log_interval == 0:
-            L.log('train_actor/loss', actor_loss, step)
-            L.log('train_actor/target_entropy', self.target_entropy, step)
-        entropy = 0.5 * log_std.shape[1] * \
-            (1.0 + np.log(2 * np.pi)) + log_std.sum(dim=-1)
-        if step % self.log_interval == 0:                                    
-            L.log('train_actor/entropy', entropy.mean(), step)
+            L.log("train_actor/loss", actor_loss, step)
+            L.log("train_actor/target_entropy", self.target_entropy, step)
+        entropy = 0.5 * log_std.shape[1] * (1.0 + np.log(2 * np.pi)) + log_std.sum(
+            dim=-1
+        )
+        if step % self.log_interval == 0:
+            L.log("train_actor/entropy", entropy.mean(), step)
 
         # optimize the actor
         self.actor_optimizer.zero_grad()
@@ -465,23 +571,21 @@ class CurlSacAgent(object):
         self.actor.log(L, step)
 
         self.log_alpha_optimizer.zero_grad()
-        alpha_loss = (self.alpha *
-                      (-log_pi - self.target_entropy).detach()).mean()
+        alpha_loss = (self.alpha * (-log_pi - self.target_entropy).detach()).mean()
         if step % self.log_interval == 0:
-            L.log('train_alpha/loss', alpha_loss, step)
-            L.log('train_alpha/value', self.alpha, step)
+            L.log("train_alpha/loss", alpha_loss, step)
+            L.log("train_alpha/value", self.alpha, step)
         alpha_loss.backward()
         self.log_alpha_optimizer.step()
 
     def update_cpc(self, obs_anchor, obs_pos, cpc_kwargs, L, step):
-        
         z_a = self.CURL.encode(obs_anchor)
         z_pos = self.CURL.encode(obs_pos, ema=True)
-        
+
         logits = self.CURL.compute_logits(z_a, z_pos)
         labels = torch.arange(logits.shape[0]).long().to(self.device)
         loss = self.cross_entropy_loss(logits, labels)
-        
+
         self.encoder_optimizer.zero_grad()
         self.cpc_optimizer.zero_grad()
         loss.backward()
@@ -489,17 +593,25 @@ class CurlSacAgent(object):
         self.encoder_optimizer.step()
         self.cpc_optimizer.step()
         if step % self.log_interval == 0:
-            L.log('train/curl_loss', loss, step)
-
+            L.log("train/curl_loss", loss, step)
 
     def update(self, replay_buffer, L, step):
-        if self.encoder_type == 'pixel':
-            obs, action, reward, next_obs, not_done, cpc_kwargs = replay_buffer.sample_cpc()
+        if self.encoder_type == "pixel":
+            (
+                obs,
+                action,
+                reward,
+                next_obs,
+                not_done,
+                cpc_kwargs,
+            ) = replay_buffer.sample_cpc()
         else:
             obs, action, reward, next_obs, not_done = replay_buffer.sample_proprio()
-    
+
+        # print("obs", obs.shape, "next_obs", next_obs.shape)
+
         if step % self.log_interval == 0:
-            L.log('train/batch_reward', reward.mean(), step)
+            L.log("train/batch_reward", reward.mean(), step)
 
         self.update_critic(obs, action, reward, next_obs, not_done, L, step)
 
@@ -514,34 +626,22 @@ class CurlSacAgent(object):
                 self.critic.Q2, self.critic_target.Q2, self.critic_tau
             )
             utils.soft_update_params(
-                self.critic.encoder, self.critic_target.encoder,
-                self.encoder_tau
+                self.critic.encoder, self.critic_target.encoder, self.encoder_tau
             )
-        
-        if step % self.cpc_update_freq == 0 and self.encoder_type == 'pixel':
+
+        if step % self.cpc_update_freq == 0 and self.encoder_type == "pixel":
             if not self.no_cpc:
                 obs_anchor, obs_pos = cpc_kwargs["obs_anchor"], cpc_kwargs["obs_pos"]
-                self.update_cpc(obs_anchor, obs_pos,cpc_kwargs, L, step)
+                self.update_cpc(obs_anchor, obs_pos, cpc_kwargs, L, step)
 
     def save(self, model_dir, step):
-        torch.save(
-            self.actor.state_dict(), '%s/actor_%s.pt' % (model_dir, step)
-        )
-        torch.save(
-            self.critic.state_dict(), '%s/critic_%s.pt' % (model_dir, step)
-        )
+        torch.save(self.actor.state_dict(), "%s/actor_%s.pt" % (model_dir, step))
+        torch.save(self.critic.state_dict(), "%s/critic_%s.pt" % (model_dir, step))
 
     def save_curl(self, model_dir, step):
         if not self.no_cpc:
-            torch.save(
-                self.CURL.state_dict(), '%s/curl_%s.pt' % (model_dir, step)
-            )
+            torch.save(self.CURL.state_dict(), "%s/curl_%s.pt" % (model_dir, step))
 
     def load(self, model_dir, step):
-        self.actor.load_state_dict(
-            torch.load('%s/actor_%s.pt' % (model_dir, step))
-        )
-        self.critic.load_state_dict(
-            torch.load('%s/critic_%s.pt' % (model_dir, step))
-        )
- 
+        self.actor.load_state_dict(torch.load("%s/actor_%s.pt" % (model_dir, step)))
+        self.critic.load_state_dict(torch.load("%s/critic_%s.pt" % (model_dir, step)))

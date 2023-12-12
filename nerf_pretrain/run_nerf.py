@@ -896,7 +896,7 @@ def train():
                 basedir,
                 expname,
                 "renderonly_{}_{:06d}".format(
-                    "test" if args.render_test else "path", start
+                    "test" if args.render_test2 else "path", start
                 ),
             )
             os.makedirs(testsavedir, exist_ok=True)
@@ -977,7 +977,7 @@ def train():
 
     N_iters = 200000 + 1
 
-    N_iters = 100 * 60 * 400
+    # N_iters = 100 * 60 * 400
 
     print("Begin")
     # print("TRAIN views are", i_train)
@@ -1071,7 +1071,7 @@ def train():
                 if i < args.precrop_iters:
                     dH = int(H // 2 * args.precrop_frac)
                     dW = int(W // 2 * args.precrop_frac)
-                    coords = torch.stack(
+                    coords = torch.st2ack(
                         torch.meshgrid(
                             torch.linspace(H // 2 - dH, H // 2 + dH - 1, 2 * dH),
                             torch.linspace(W // 2 - dW, W // 2 + dW - 1, 2 * dW),
@@ -1190,7 +1190,13 @@ def train():
             # Turn on testing mode
             with torch.no_grad():
                 rgbs, disps = render_path(
-                    render_poses, hwf, K, args.chunk, render_kwargs_test, latent=latent
+                    render_poses,
+                    hwf,
+                    K,
+                    args.chunk,
+                    render_kwargs_test,
+                    num_semantic_classes=args.n_classes,
+                    latent=latent,
                 )
             print("Done, saving", rgbs.shape, disps.shape)
             moviebase = os.path.join(
@@ -1232,6 +1238,7 @@ def train():
                     K,
                     args.chunk,
                     render_kwargs_test,
+                    num_semantic_classes=args.n_classes,
                     savedir=testsavedir,
                     latent=latent,
                 )
