@@ -349,6 +349,7 @@ def main():
     )
 
     if args.distillation != "":
+        print('DIST AT MAIN', obs_shape)
         if args.distillation == "random":
             distillation = Distillation(obs_shape, target_net=None, args=args)
         elif args.distillation == "encoder":
@@ -475,20 +476,19 @@ def main():
                 agent.update(replay_buffer, L, step)
 
         next_obs, reward, done, info = env.step(action)
-        # print("next obs", next_obs.shape) 9x480x480
         next_obs = F.interpolate(next_obs[None, ...], (128, 128)).view(
             (9 * args.frame_stack, 128, 128)
         )  # 9x128x128
-
+ 
         obs = F.interpolate(obs[None, ...], (128, 128)).view(
             (9 * args.frame_stack, 128, 128)
         )
 
         # add exploration reward if we're doing random/encoder network distillation
         if args.distillation != "":
-            distillation_loss = distillation.step(obs)
+            distillation_loss = distillation.step(obs).cpu().detach().numpy()
 
-            print("distillation loss:", distillation_loss)
+            print("distillation loss:", distillation_loss, "scaled: ",args.distillation_scale * distillation_loss)
             reward += args.distillation_scale * distillation_loss
 
         # allow infinit bootstrap
