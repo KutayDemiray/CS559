@@ -63,6 +63,8 @@ class Actor(nn.Module):
         encoder_name=None,
         finetune_encoder=False,
         env_name=None,
+        render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array",
+        exp_type="original",  # args.exp_type
     ):
         super().__init__()
 
@@ -79,6 +81,8 @@ class Actor(nn.Module):
             finetune_encoder=finetune_encoder,
             log_encoder=False,
             env_name=env_name,
+            render_mode=render_mode,
+            exp_type=exp_type,
         )
 
         self.encoder.cuda()
@@ -183,6 +187,8 @@ class Critic(nn.Module):
         encoder_name=None,
         finetune_encoder=False,
         env_name=None,
+        render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array",
+        exp_type="original",  # args.exp_type
     ):
         super().__init__()
 
@@ -200,6 +206,8 @@ class Critic(nn.Module):
             finetune_encoder=finetune_encoder,
             log_encoder=log_encoder,
             env_name=env_name,
+            render_mode=render_mode,
+            exp_type=exp_type,
         )
 
         self.encoder.cuda()
@@ -335,6 +343,8 @@ class CurlSacAgent(object):
         encoder_name=None,
         no_cpc=False,
         env_name=None,
+        render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array",
+        exp_type="original",  # args.exp_type
     ):
         self.device = device
         self.discount = discount
@@ -355,6 +365,7 @@ class CurlSacAgent(object):
         self.finetune_encoder = finetune_encoder
         self.encoder_name = encoder_name
         self.no_cpc = no_cpc
+        self.render_mode = render_mode
         print("make actor")
         self.actor = Actor(
             obs_shape,
@@ -371,6 +382,8 @@ class CurlSacAgent(object):
             encoder_name=encoder_name,
             finetune_encoder=finetune_encoder,
             env_name=env_name,
+            render_mode=render_mode,
+            exp_type=exp_type,
         ).to(device)
         print("make critic")
         self.critic = Critic(
@@ -387,6 +400,8 @@ class CurlSacAgent(object):
             encoder_name=encoder_name,
             finetune_encoder=finetune_encoder,
             env_name=env_name,
+            render_mode=render_mode,
+            exp_type=exp_type,
         ).to(device)
         print("make critic target")
         self.critic_target = Critic(
@@ -403,6 +418,8 @@ class CurlSacAgent(object):
             encoder_name=encoder_name,
             finetune_encoder=finetune_encoder,
             env_name=env_name,
+            render_mode=render_mode,
+            exp_type=exp_type,
         ).to(device)
 
         self.critic_target.load_state_dict(self.critic.state_dict())

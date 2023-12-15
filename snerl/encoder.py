@@ -253,10 +253,17 @@ class MeanEncoder(nn.Module):
         log_encoder=False,
         output_logits=False,
         env_name=None,
+        exp_type="affordance",  # kutay: "affordance" or "original" (rgb)
+        render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array"
     ):
         super().__init__()
 
-        assert len(obs_shape) == 3
+        # assert len(obs_shape) == 3
+        if render_mode == "rgb_array":
+            self.n_in_channels = 5
+        elif render_mode == "rgbd_array":
+            self.n_in_channels = 3
+
         self.obs_shape = obs_shape
         assert feature_dim / frame_stack == 63
         self.feature_dim = feature_dim
@@ -270,6 +277,8 @@ class MeanEncoder(nn.Module):
         self.log_encoder = log_encoder
         self.width = obs_shape[-1]
         self.env_name = env_name
+        self.exp_type = exp_type
+        self.render_mode = render_mode
         if self.finetune_encoder or self.log_encoder:
             raise NotImplementedError
 
@@ -280,7 +289,9 @@ class MeanEncoder(nn.Module):
         else:
             out_dim = OUT_DIM_100[self.num_layers]
 
-        self.convs = nn.ModuleList([nn.Conv2d(3, self.num_filters, 3, stride=2)])
+        self.convs = nn.ModuleList(
+            [nn.Conv2d(self.n_in_channels, self.num_filters, 3, stride=2)]
+        )
         for i in range(self.num_layers - 1):
             self.convs.append(
                 nn.Conv2d(self.num_filters, self.num_filters, 3, stride=1)
@@ -315,7 +326,7 @@ class MeanEncoder(nn.Module):
 
         if self.encoder_name == "snerl":
             state_dict = torch.load(
-                "./encoder_pretrained/{}/snerl.tar".format(self.env_name),
+                f"./encoder_pretrained/{self.env_name}/{self.exp_type}/snerl.tar",
                 map_location="cpu",
             )
             # print(state_dict.keys())
@@ -382,9 +393,14 @@ class MeanEncoder(nn.Module):
 
             # print("here 2", obs.shape)
             # print("frame stack", self.frame_stack * batch * self.multiview)
-            obs = obs.view(
-                batch * self.frame_stack * self.multiview, 3, self.width, self.width
-            )
+            if self.render_mode == "rgbd_array":
+                obs = obs.view(
+                    batch * self.frame_stack * self.multiview, 3, self.width, self.width
+                )
+            elif self.render_mode == "rgb_array":
+                obs = obs.view(
+                    batch * self.frame_stack * self.multiview, 4, self.width, self.width
+                )
             # print("succ")
             obs_pose = obs_pose.expand(
                 (batch * self.frame_stack, self.multiview, 16)
@@ -445,6 +461,8 @@ _AVAILABLE_ENCODERS = {
     "nerf": MeanEncoder,
 }
 
+from affordance_encoder import MixedEncoder
+
 
 def make_encoder(
     encoder_type,
@@ -459,6 +477,8 @@ def make_encoder(
     finetune_encoder=False,
     log_encoder=False,
     env_name=None,
+    exp_type="affordance",  # kutay: "affordance" or "original" (rgb)
+    render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array"
 ):
     assert encoder_type in _AVAILABLE_ENCODERS
     if encoder_type == "nerf":
@@ -472,6 +492,25 @@ def make_encoder(
             log_encoder,
             output_logits,
             env_name,
+            exp_type,
+            render_mode,
+        )
+    elif encoder_type == "nerf_affordance":
+        return MixedEncoder(
+            encoder_type=encoder_type,
+            obs_shape=obs_shape,
+            feature_dim=feature_dim,
+            num_layers=num_layers,
+            num_filters=num_filters,
+            output_logits=output_logits,
+            multiview=multiview,
+            frame_stack=frame_stack,
+            encoder_name=encoder_name,
+            finetune_encoder=finetune_encoder,
+            log_encoder=log_encoder,
+            env_name=env_name,
+            exp_type=exp_type,
+            render_mode=render_mode,
         )
     else:
         return _AVAILABLE_ENCODERS[encoder_type](
