@@ -18,5 +18,8 @@ precrop_frac = 0.5
 
 half_res = False
 
-n_eps = 10
-n_timesteps = 10
+n_eps = 120
+n_timesteps = 120
+
+i_img = 1000
+i_video = 5000

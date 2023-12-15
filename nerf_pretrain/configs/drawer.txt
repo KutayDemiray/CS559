@@ -21,11 +21,5 @@ half_res = False
 n_eps = 120
 n_timesteps = 120
 
-frame_stack = 2
-
-eval_freq = 10000
-
-batch_size = 128
-
-save_video = True
-save_model = True
+i_img = 1000
+i_video = 5000
