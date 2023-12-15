@@ -18,3 +18,4 @@ nerf_pretrain/logs/drawer/config.txt
 segnet/Handle/train
 segnet/Handle/weights
 *.npy
+segnet/Handle/encoders
