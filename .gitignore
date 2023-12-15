@@ -13,3 +13,5 @@ encoder_pretrained/*
 nerf_pretrain/run_nerf_2.py
 nerf_pretrain/configs/drawer_affordance.txt
 nerf_pretrain/segtest.py
+nerf_pretrain/logs/drawer/config.txt
+nerf_pretrain/logs/drawer/config.txt
