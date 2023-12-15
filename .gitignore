@@ -15,3 +15,6 @@ nerf_pretrain/configs/drawer_affordance.txt
 nerf_pretrain/segtest.py
 nerf_pretrain/logs/drawer/config.txt
 nerf_pretrain/logs/drawer/config.txt
+segnet/Handle/train
+segnet/Handle/weights
+*.npy
