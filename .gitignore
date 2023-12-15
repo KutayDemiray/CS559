@@ -19,3 +19,4 @@ segnet/Handle/train
 segnet/Handle/weights
 *.npy
 segnet/Handle/encoders
+snerl/sizetest.py
