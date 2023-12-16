@@ -3,6 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def tie_weights(src, trg):
+    assert type(src) == type(trg)
+    trg.weight = src.weight
+    trg.bias = src.bias
+
+
 class SegnetEncoder(nn.Module):
     def __init__(self, in_chn=3, out_chn=2, BN_momentum=0.5):
         super(SegnetEncoder, self).__init__()
@@ -53,6 +59,29 @@ class SegnetEncoder(nn.Module):
         self.BNEn52 = nn.BatchNorm2d(512, momentum=BN_momentum)
         self.ConvEn53 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
         self.BNEn53 = nn.BatchNorm2d(512, momentum=BN_momentum)
+
+        self.convs = [
+            self.ConvEn11,
+            self.ConvEn12,
+            self.ConvEn21,
+            self.ConvEn22,
+            self.ConvEn31,
+            self.ConvEn32,
+            self.ConvEn33,
+            self.ConvEn41,
+            self.ConvEn42,
+            self.ConvEn43,
+            self.ConvEn51,
+            self.ConvEn52,
+            self.ConvEn53,
+        ]
+        self.num_layers = len(self.convs)
+
+    def copy_conv_weights_from(self, source):
+        """Tie convolutional layers"""
+        # only tie conv layers
+        for i in range(self.num_layers):
+            tie_weights(src=source.convs[i], trg=self.convs[i])
 
     def forward(self, x):
         # ENCODE LAYERS

@@ -27,10 +27,16 @@ from distillation import Distillation
 def parse_args():
     parser = argparse.ArgumentParser()
     # environment
-    parser.add_argument("--env_name", default="window-open-v2")
-    parser.add_argument("--n_eps", default=120, type=int)
-    parser.add_argument("--n_timesteps", default=120, type=int)
-    parser.add_argument("--n_channels", default=3, type=int)
+    parser.add_argument("--env_name", default="drawer-open-v2")
+    parser.add_argument("--n_eps", default=120, type=int)  # kutay
+    parser.add_argument("--n_timesteps", default=120, type=int)  # kutay
+    parser.add_argument("--n_channels", default=3, type=int)  # kutay
+    parser.add_argument(
+        "--render_mode",
+        type=str,
+        default="rgbd_array",
+        choices=["rgb_array", "rgbd_array"],
+    )
     parser.add_argument("--pre_transform_image_size", default=128, type=int)
     parser.add_argument("--camera_name", nargs="*", default=None)
     parser.add_argument("--multicam_contrastive", default=False, action="store_true")
@@ -65,7 +71,9 @@ def parse_args():
     parser.add_argument("--stddev_schedule", default="linear(1.0,0.1,500000)", type=str)
     parser.add_argument("--stddev_clip", default=0.3, type=float)
     # encoder
-    parser.add_argument("--encoder_type", default="nerf", type=str)
+    parser.add_argument(
+        "--encoder_type", default="nerf", type=str, choices=["nerf", "nerf_affordance"]
+    )
     parser.add_argument("--encoder_feature_dim", default=126, type=int)
     parser.add_argument("--encoder_lr", default=1e-3, type=float)
     parser.add_argument("--encoder_tau", default=0.05, type=float)
@@ -98,6 +106,8 @@ def parse_args():
 
     parser.add_argument("--log_interval", default=100, type=int)
 
+    parser.add_argument("--exp_type", type=str, choices=["original", "affordance"])
+
     args = parser.parse_args()
     return args
 
@@ -111,9 +121,19 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
         total_success = 0
         for i in range(num_episodes):
             obs = env.reset()
-            obs = F.interpolate(obs[None, ...], (128, 128)).view(
-                9 * args.frame_stack, 128, 128
-            )
+
+            if obs.shape[0] == 3 * args.multiview:
+                obs = torch.concat([obs, obs], dim=0)
+
+            if args.render_mode == "rgbd_array":
+                obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                    3 * 3 * args.frame_stack, 128, 128
+                )
+            elif args.render_mode == "rgb_array":
+                obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                    3 * 4 * args.frame_stack, 128, 128
+                )
+
             video.init(enabled=(i == 0))
             done = False
             episode_reward = 0
@@ -135,10 +155,25 @@ def evaluate(env, agent, video, num_episodes, L, step, args):
                         # print("action obs", obs.shape)
                         action = agent.select_action(obs)
                 obs, reward, done, info = env.step(action)
+
+                """
                 obs = F.interpolate(obs[None, ...], (128, 128)).view(
                     9 * args.frame_stack, 128, 128
                 )
+                """
                 video.record(env, obs)
+
+                if obs.shape[0] == 3 * args.multiview:
+                    obs = torch.concat([obs, obs], dim=0)
+                if args.render_mode == "rgbd_array":
+                    obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                        3 * 3 * args.frame_stack, 128, 128
+                    )
+                elif args.render_mode == "rgb_array":
+                    obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                        3 * 4 * args.frame_stack, 128, 128
+                    )
+
                 episode_reward += reward
             total_success += info["success"]
             video.save("%d.mp4" % step)
@@ -193,6 +228,8 @@ def make_agent(obs_shape, action_shape, args, device):
             encoder_name=args.encoder_name,
             no_cpc=args.no_cpc,
             env_name=args.env_name,
+            render_mode=args.render_mode,
+            exp_type=args.exp_type,
         )
     else:
         assert "agent is not supported: %s" % args.agent
@@ -216,7 +253,11 @@ def main():
     utils.set_seed_everywhere(args.seed)
     env = EnvWrapper(
         env_name=args.env_name,
-        from_pixels=(args.encoder_type == "pixel" or args.encoder_type == "nerf"),
+        from_pixels=(
+            args.encoder_type == "pixel"
+            or args.encoder_type == "nerf"
+            or args.encoder_type == "nerf_affordance"
+        ),
         height=args.pre_transform_image_size,
         width=args.pre_transform_image_size,
         frame_skip=args.action_repeat,
@@ -225,6 +266,7 @@ def main():
         sparse_reward=args.sparse,
         device=device,
         snerl_cam_names=args.camera_name,
+        render_mode=args.render_mode,
     )
 
     env.seed(args.seed)
@@ -260,6 +302,9 @@ def main():
         + str(args.encoder_name)
         + "-"
         + str(args.suffix)
+        + ""
+        if args.distillation == ""
+        else "-distillation-" + args.distillation
     )
     args.work_dir = args.work_dir + "/" + exp_name
 
@@ -287,47 +332,51 @@ def main():
 
     if args.encoder_type == "pixel":
         obs_shape = (
-            args.multiview * 3 * args.frame_stack,
+            args.multiview * args.n_channels * args.frame_stack,
             args.image_size,
             args.image_size,
         )
 
         if args.multicam_contrastive:
             pre_aug_obs_shape = (
-                2 * args.multiview * 3 * args.frame_stack,
+                2 * args.multiview * args.n_channels * args.frame_stack,
                 args.pre_transform_image_size,
                 args.pre_transform_image_size,
             )
             buffer_obs_shape = (
-                2 * args.multiview * 3,
+                2 * args.multiview * args.n_channels,
                 args.pre_transform_image_size,
                 args.pre_transform_image_size,
             )
         else:
             pre_aug_obs_shape = (
-                args.multiview * 3 * args.frame_stack,
+                args.multiview * args.n_channels * args.frame_stack,
                 args.pre_transform_image_size,
                 args.pre_transform_image_size,
             )
             buffer_obs_shape = (
-                args.multiview * 3,
+                args.multiview * args.n_channels,
                 args.pre_transform_image_size,
                 args.pre_transform_image_size,
             )
 
-    elif args.encoder_type == "nerf":
+    elif args.encoder_type == "nerf" or args.encoder_type == "nerf_affordance":
         assert args.pre_transform_image_size == args.image_size
         obs_shape = (
-            args.multiview * 3 * args.frame_stack,
+            args.multiview * args.n_channels * args.frame_stack,
             args.pre_transform_image_size,
             args.pre_transform_image_size,
         )
         pre_aug_obs_shape = (
-            args.multiview * 3 * args.frame_stack,
+            args.multiview * args.n_channels * args.frame_stack,
             args.image_size,
             args.image_size,
         )
-        buffer_obs_shape = (args.multiview * 3, args.image_size, args.image_size)
+        buffer_obs_shape = (
+            args.multiview * args.n_channels,
+            args.image_size,
+            args.image_size,
+        )
 
     else:
         raise NotImplementedError
@@ -359,60 +408,13 @@ def main():
         distillation.predictor_net.cuda()
         distillation.target_net.cuda()
 
-        """
-        distillation_predictor = make_encoder(
-            args.encoder_type,
-            obs_shape,
-            args.encoder_feature_dim,
-            args.num_layers,
-            args.num_filters,
-            output_logits=False,
-            multiview=args.multiview,
-            frame_stack=args.frame_stack,
-            encoder_name=args.encoder_name,
-            finetune_encoder=args.finetune_encoder,
-            log_encoder=False,
-            env_name=env_name,
-        )
-
-        if args.distillation == "random":
-            distillation_target = make_encoder(
-                args.encoder_type,
-                obs_shape,
-                args.encoder_feature_dim,
-                args.num_layers,
-                args.num_filters,
-                output_logits=False,
-                multiview=args.multiview,
-                frame_stack=args.frame_stack,
-                encoder_name=args.encoder_name,
-                finetune_encoder=args.finetune_encoder,
-                log_encoder=False,
-                env_name=env_name,
-            )
-        elif args.distillation == "encoder":
-            distillation_target = agent.actor.encoder
-
-        predictor_optim = torch.optim.Adam(
-            distillation_predictor.parameters(), lr=args.distillation_lr
-        )
-
-        distillation_predictor.cuda()
-        distillation_target.cuda()
-        """
-
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
     episode, episode_reward, done = 0, 0, True
     start_time = time.time()
 
+    # training loop
     for step in range(args.num_train_steps):
-        """
-        if step % 100 == 0:
-            ts = datetime.timestamp(datetime.now())
-            ts = datetime.fromtimestamp(ts)
-            print(f"[{ts}] Step {step}")
-        """
         # evaluate agent periodically
         if step % args.eval_freq == 0:
             ts = datetime.timestamp(datetime.now())
@@ -443,9 +445,21 @@ def main():
             print(f"[{ts}] Step {step}: Episode ended with reward {episode_reward}")
 
             obs = env.reset()
-            obs = F.interpolate(obs[None, ...], (128, 128)).view(
-                (9 * args.frame_stack, 128, 128)
-            )
+
+            # print("obsss", obs.shape, args.multiview)
+            if obs.shape[0] == 3 * args.multiview:
+                obs = torch.concat([obs, obs], dim=0)
+            # print("obsssssss", obs.shape)
+
+            if args.render_mode == "rgbd_array":
+                obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                    3 * 3 * args.frame_stack, 128, 128
+                )
+            elif args.render_mode == "rgb_array":
+                obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                    3 * 4 * args.frame_stack, 128, 128
+                )
+
             # print("obs", obs)
             done = False
             episode_reward = 0
@@ -476,13 +490,24 @@ def main():
 
         next_obs, reward, done, info = env.step(action)
         # print("next obs", next_obs.shape) 9x480x480
-        next_obs = F.interpolate(next_obs[None, ...], (128, 128)).view(
-            (9 * args.frame_stack, 128, 128)
-        )  # 9x128x128
 
-        obs = F.interpolate(obs[None, ...], (128, 128)).view(
-            (9 * args.frame_stack, 128, 128)
-        )
+        if next_obs.shape[0] == 9:
+            next_obs = torch.concat([next_obs, next_obs], dim=0)
+
+        if args.render_mode == "rgbd_array":
+            next_obs = F.interpolate(next_obs[None, ...], (128, 128)).view(
+                3 * 3 * args.frame_stack, 128, 128
+            )
+            obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                (9 * args.frame_stack, 128, 128)
+            )
+        elif args.render_mode == "rgb_array":
+            next_obs = F.interpolate(next_obs[None, ...], (128, 128)).view(
+                3 * 4 * args.frame_stack, 128, 128
+            )
+            obs = F.interpolate(obs[None, ...], (128, 128)).view(
+                (3 * 4 * args.frame_stack, 128, 128)
+            )
 
         # add exploration reward if we're doing random/encoder network distillation
         if args.distillation != "":

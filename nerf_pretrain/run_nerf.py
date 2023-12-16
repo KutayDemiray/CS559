@@ -1071,7 +1071,7 @@ def train():
                 if i < args.precrop_iters:
                     dH = int(H // 2 * args.precrop_frac)
                     dW = int(W // 2 * args.precrop_frac)
-                    coords = torch.st2ack(
+                    coords = torch.stack(
                         torch.meshgrid(
                             torch.linspace(H // 2 - dH, H // 2 + dH - 1, 2 * dH),
                             torch.linspace(W // 2 - dW, W // 2 + dW - 1, 2 * dW),

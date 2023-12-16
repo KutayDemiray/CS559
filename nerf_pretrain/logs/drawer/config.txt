@@ -1,6 +1,6 @@
 expname = drawer
 basedir = ./logs
-datadir = ./data/drawer-open-v2
+datadir = ./data/drawer-open-v2-128
 dataset_type = blender
 
 no_batching = True

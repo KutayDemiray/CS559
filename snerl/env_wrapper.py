@@ -59,17 +59,19 @@ class EnvWrapper(object):
         device,
         snerl_cam_names: List[str],
         tsne=False,
+        render_mode="rgbd_array",
     ):
         assert from_pixels
         ml1 = metaworld.ML1(env_name)  # Construct the benchmark, sampling tasks
         self.env = ml1.train_classes[env_name](
-            render_mode="rgbd_array"  # kutay
+            render_mode=render_mode  # kutay
         )  # Create an environment with task `pick_place`
         self.env.set_task(ml1.train_tasks[0])
         self.device = device
         print("env device", self.device)
         self.tsne = tsne
         self.snerl_cam_names = snerl_cam_names
+        self.render_mode = render_mode
 
         if env_name == "window-open-v2":
             raise Exception("window-open-v2 is work in progress")
@@ -135,12 +137,18 @@ class EnvWrapper(object):
         single_image = torch.permute(single_image, (2, 0, 1)).type(torch.uint8)
         return single_image
 
+    # kutay
+    def one_hot_affordance(
+        self, obs: np.ndarray, color: np.ndarray = np.array([156, 104, 125])
+    ) -> torch.Tensor:
+        indices = np.where(np.all(obs == color, axis=-1))
+        affordance = np.zeros((obs.shape[0], obs.shape[1], 1))
+        affordance[indices] = 1
+
+        affordance = torch.tensor(affordance).permute(2, 0, 1).to(self.device)
+        return affordance
+
     def reset(self, *args, **kwargs):
-        """
-        ts = datetime.timestamp(datetime.now())
-        ts = datetime.fromtimestamp(ts)
-        print(f"[{ts}] reset begin")
-        """
         state_obs = self.env.reset()
 
         multicam_image = []
@@ -189,30 +197,33 @@ class EnvWrapper(object):
             """
             # kutay
             # print(single_cam)
-            rgbd = self.env.render()
-            # print(rgbd.shape)
-            single_image, single_depth = rgbd[:, :, :3], rgbd[:, :, 3]
-            # kutay end
+            if self.render_mode == "rgbd_array":
+                rgbd = self.env.render()
+                single_image, single_depth = rgbd[:, :, :3], rgbd[:, :, 3]
+            elif self.render_mode == "rgb_array":
+                single_image, seg, single_depth = self.env.render()
+                single_seg = self.one_hot_affordance(seg)
+                # print(single_image.device, single_seg.device)
+
+                # print(rgbd.shape)
 
             single_image = self.background_mask(single_image, single_depth)
 
-            multicam_image.append(single_image)
-        """
-        ts = datetime.timestamp(datetime.now())
-        ts = datetime.fromtimestamp(ts)
-        print(f"[{ts}] reset end")
-        """
+            if self.render_mode == "rgbd_array":
+                multicam_image.append(single_image)
+            elif self.render_mode == "rgb_array":
+                # print(single_image.device, single_seg.device)
+                multicam_image.append(
+                    torch.concatenate([single_image, single_seg], dim=0)
+                )
+            # kutay end
+
         if self.tsne:
             return torch.cat(multicam_image, dim=0), state_obs
         else:
             return torch.cat(multicam_image, dim=0)
 
     def step(self, action):
-        """
-        ts = datetime.timestamp(datetime.now())
-        ts = datetime.fromtimestamp(ts)
-        print(f"[{ts}] step begin")
-        """
         state_obs, reward, terminated, truncated, info = self.env.step(action)
         done = terminated or truncated
         multicam_image = []
@@ -220,7 +231,7 @@ class EnvWrapper(object):
         camera_name_aug = self.camera_name.copy()
         if self.multicam_contrastive:
             for single_cam in self.camera_name:
-                #print("first", single_cam)
+                # print("first", single_cam)
                 a, b, c = single_cam.split("_")
                 while True:
                     perturb_phi = random.randint(-10, 10)
@@ -231,23 +242,29 @@ class EnvWrapper(object):
                     "cam2_%d_%d" % (int(b) + perturb_phi, int(c) + perturb_psi)
                 )
         # print("aug", camera_name_aug)
+
         for single_cam in camera_name_aug:
             # kutay
-            # print("second", single_cam)
+            # print(single_cam)
             self.env.camera_name = single_cam
-            rgbd = self.env.render()
-            # print(rgbd.shape)
-            single_image, single_depth = rgbd[:, :, :3], rgbd[:, :, 3]
-            # kutay end
-            """
-            single_image, single_depth = self.sim.render(
-                width=self.width, height=self.height, camera_name=single_cam, depth=True
-            )
-            """
+            if self.render_mode == "rgbd_array":
+                rgbd = self.env.render()
+                single_image, single_depth = rgbd[:, :, :3], rgbd[:, :, 3]
+            elif self.render_mode == "rgb_array":
+                single_image, seg, single_depth = self.env.render()
+                single_seg = self.one_hot_affordance(seg)
+
+                # print(rgbd.shape)
 
             single_image = self.background_mask(single_image, single_depth)
 
-            multicam_image.append(single_image)
+            if self.render_mode == "rgbd_array":
+                multicam_image.append(single_image)
+            elif self.render_mode == "rgb_array":
+                multicam_image.append(
+                    torch.concatenate([single_image, single_seg[None, ...]], dim=0)
+                )
+            # kutay end
 
         # print(len(multicam_image))
         if self.sparse_reward:

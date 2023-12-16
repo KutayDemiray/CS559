@@ -6,6 +6,8 @@ import torchvision.models as models
 
 import torch.nn.functional as F
 
+from affordance_encoder import MixedEncoder
+
 
 trans_t = lambda t: torch.Tensor(
     [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, t], [0, 0, 0, 1]]
@@ -253,8 +255,9 @@ class MeanEncoder(nn.Module):
         log_encoder=False,
         output_logits=False,
         env_name=None,
-        exp_type="affordance",  # kutay: "affordance" or "original" (rgb)
+        exp_type="original",  # kutay: "affordance" or "original" (rgb)
         render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array"
+        encoder_type="nerf",
     ):
         super().__init__()
 
@@ -279,6 +282,7 @@ class MeanEncoder(nn.Module):
         self.env_name = env_name
         self.exp_type = exp_type
         self.render_mode = render_mode
+        self.encoder_type = encoder_type
         if self.finetune_encoder or self.log_encoder:
             raise NotImplementedError
 
@@ -393,13 +397,20 @@ class MeanEncoder(nn.Module):
 
             # print("here 2", obs.shape)
             # print("frame stack", self.frame_stack * batch * self.multiview)
+
             if self.render_mode == "rgbd_array":
                 obs = obs.view(
-                    batch * self.frame_stack * self.multiview, 3, self.width, self.width
+                    batch * self.frame_stack * self.multiview,
+                    3,
+                    self.width,
+                    self.width,
                 )
             elif self.render_mode == "rgb_array":
                 obs = obs.view(
-                    batch * self.frame_stack * self.multiview, 4, self.width, self.width
+                    batch * self.frame_stack * self.multiview,
+                    4,
+                    self.width,
+                    self.width,
                 )
             # print("succ")
             obs_pose = obs_pose.expand(
@@ -459,9 +470,8 @@ _AVAILABLE_ENCODERS = {
     "pixel": PixelEncoder,
     "identity": IdentityEncoder,
     "nerf": MeanEncoder,
+    "nerf_affordance": MixedEncoder,
 }
-
-from affordance_encoder import MixedEncoder
 
 
 def make_encoder(
@@ -494,24 +504,31 @@ def make_encoder(
             env_name,
             exp_type,
             render_mode,
+            encoder_type=encoder_type,
         )
     elif encoder_type == "nerf_affordance":
-        return MixedEncoder(
-            encoder_type=encoder_type,
+        snerl_encoder = MeanEncoder(
             obs_shape=obs_shape,
             feature_dim=feature_dim,
-            num_layers=num_layers,
-            num_filters=num_filters,
-            output_logits=output_logits,
             multiview=multiview,
             frame_stack=frame_stack,
             encoder_name=encoder_name,
-            finetune_encoder=finetune_encoder,
-            log_encoder=log_encoder,
+            finetune_encoder=False,
+            log_encoder=False,
+            output_logits=output_logits,
             env_name=env_name,
             exp_type=exp_type,
             render_mode=render_mode,
+            encoder_type=encoder_type,
         )
+        encoder = MixedEncoder(
+            snerl_encoder=snerl_encoder,
+            feature_dim=feature_dim,
+            finetune_encoder=finetune_encoder,
+        )
+
+        encoder.cuda()
+        return encoder
     else:
         return _AVAILABLE_ENCODERS[encoder_type](
             obs_shape,
