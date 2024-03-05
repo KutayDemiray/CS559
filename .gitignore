@@ -20,3 +20,4 @@ segnet/Handle/weights
 *.npy
 segnet/Handle/encoders
 snerl/sizetest.py
+requirements.txt

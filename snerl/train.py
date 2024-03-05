@@ -51,12 +51,12 @@ def parse_args():
     # train
     parser.add_argument("--agent", default="curl_sac", type=str)
     parser.add_argument("--init_steps", default=1000, type=int)
-    parser.add_argument("--num_train_steps", default=1000000, type=int)
+    parser.add_argument("--num_train_steps", default=500000, type=int)
     parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument("--hidden_dim", default=1024, type=int)
     # eval
-    parser.add_argument("--eval_freq", default=1000, type=int)
-    parser.add_argument("--num_eval_episodes", default=10, type=int)
+    parser.add_argument("--eval_freq", default=2500, type=int)
+    parser.add_argument("--num_eval_episodes", default=5, type=int)
     # critic
     parser.add_argument("--critic_lr", default=1e-3, type=float)
     parser.add_argument("--critic_beta", default=0.9, type=float)
@@ -107,6 +107,8 @@ def parse_args():
     parser.add_argument("--log_interval", default=100, type=int)
 
     parser.add_argument("--exp_type", type=str, choices=["original", "affordance"])
+
+    parser.add_argument("--save_freq", type=int, default=100000)
 
     args = parser.parse_args()
     return args
@@ -302,9 +304,17 @@ def main():
         + str(args.encoder_name)
         + "-"
         + str(args.suffix)
-        + ""
-        if args.distillation == ""
-        else "-distillation-" + args.distillation
+        + (
+            ""
+            if (args.distillation == "")
+            else "-distillation-"
+            + str(args.distillation)
+            + "-"
+            + "distlr"
+            + str(args.distillation_lr)
+            + "-distscale"
+            + str(args.distillation_scale)
+        )
     )
     args.work_dir = args.work_dir + "/" + exp_name
 
@@ -412,7 +422,10 @@ def main():
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
     episode, episode_reward, done = 0, 0, True
+    raw_episode_reward = 0
     start_time = time.time()
+
+    distillation_losses = []
 
     # training loop
     for step in range(args.num_train_steps):
@@ -423,13 +436,22 @@ def main():
             print(f"[{ts}] Eval begin at step {step}")
             L.log("eval/episode", episode, step)
             evaluate(env, agent, video, args.num_eval_episodes, L, step, args)
-            if args.save_model and args.encoder_type == "pixel":
-                agent.save_curl(model_dir, step)
-            if args.save_buffer:
-                replay_buffer.save(buffer_dir)
+
             ts = datetime.timestamp(datetime.now())
             ts = datetime.fromtimestamp(ts)
             print(f"[{ts}] Eval end")
+
+        if step % args.save_freq == 0:
+            if args.save_model and args.encoder_type == "pixel":
+                agent.save_curl(model_dir, step)
+            elif args.save_model and args.encoder_type == "nerf":
+                # agent.save_curl(model_dir, step)
+                agent.save(model_dir, step)
+
+                if args.distillation != "":
+                    distillation.save(model_dir, step)
+            if args.save_buffer:
+                replay_buffer.save(buffer_dir)
 
         if done:
             if step > 0:
@@ -440,6 +462,19 @@ def main():
                 start_time = time.time()
             if step % args.log_interval == 0:
                 L.log("train/episode_reward", episode_reward, step)
+
+                if args.distillation != "":
+                    L.log(
+                        "train/mean_distillation_loss",
+                        np.mean(distillation_losses),
+                        step,
+                    )
+
+                    L.log(
+                        "train/raw_episode_reward",
+                        raw_episode_reward,
+                        step,
+                    )
 
             ts = datetime.timestamp(datetime.now())
             ts = datetime.fromtimestamp(ts)
@@ -464,6 +499,8 @@ def main():
             # print("obs", obs)
             done = False
             episode_reward = 0
+            raw_episode_reward = 0
+            distillation_losses = []
             episode_step = 0
             episode += 1
             if step % args.log_interval == 0:
@@ -501,21 +538,36 @@ def main():
         # add exploration reward if we're doing random/encoder network distillation
         if args.distillation != "":
             distillation_loss = distillation.step(obs).cpu().detach().numpy()
-
+            """
             print(
                 "distillation loss:",
                 distillation_loss,
                 "scaled: ",
                 args.distillation_scale * distillation_loss,
             )
-            reward += args.distillation_scale * distillation_loss
+            """
+            distillation_losses.append(distillation_loss)
+            # reward += args.distillation_scale * distillation_loss
 
         # allow infinit bootstrap
         done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(done)
-        episode_reward += reward
+
+        if args.distillation == "":
+            episode_reward += reward
+        else:
+            raw_episode_reward += reward
+            episode_reward += reward + args.distillation_scale * distillation_loss
+            reward = reward + args.distillation_scale * distillation_loss
 
         # print("after interp", obs.shape)
-        replay_buffer.add(obs, action, reward, next_obs, done_bool, episode_step)
+        replay_buffer.add(
+            obs,
+            action,
+            reward,
+            next_obs,
+            done_bool,
+            episode_step,
+        )
 
         obs = next_obs
         episode_step += 1

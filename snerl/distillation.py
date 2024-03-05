@@ -13,8 +13,9 @@ class Distillation:
         self.lr = args.distillation_lr
         self.alpha = args.distillation_scale
         self.distillation_type = args.distillation
-        
+
         if target_net is None:
+            print("creating random distiller")
             self.target_net = make_encoder(
                 args.encoder_type,
                 obs_shape,
@@ -30,11 +31,11 @@ class Distillation:
                 env_name=args.env_name,
             )
         else:
-            self.target_net = target_net
+            print("creating encoder distiller")
+            self.target_net = copy.deepcopy(target_net)
 
-        #nn.init.normal_(self.target_net.parameters(), mean=0, std=1)
+        # nn.init.normal_(self.target_net.parameters(), mean=0, std=1)
 
-        
         self.predictor_net = make_encoder(
             args.encoder_type,
             obs_shape,
@@ -49,7 +50,7 @@ class Distillation:
             log_encoder=False,
             env_name=args.env_name,
         )
-        #self.predictor_net = copy.deepcopy(self.target_net)
+        # self.predictor_net = copy.deepcopy(self.target_net)
         nn.init.normal_(self.predictor_net.mlp1.weight)
         nn.init.normal_(self.predictor_net.mlp2.weight)
         nn.init.normal_(self.predictor_net.fc.weight)
@@ -61,7 +62,7 @@ class Distillation:
             self.predictor_net.parameters(), lr=args.distillation_lr
         )
 
-        #nn.init.normal_(self.predictor_net.parameters(), mean=0, std=1)
+        # nn.init.normal_(self.predictor_net.parameters(), mean=0, std=1)
 
     def step(self, obs):
         self.target_net.eval()
@@ -78,7 +79,23 @@ class Distillation:
         distillation_loss.backward()
         self.predictor_optim.step()
 
-        if self.distillation_type == "encoder":
-            self.target_net.train()
+        # if self.distillation_type == "encoder":
+        #    self.target_net.train()
 
         return distillation_loss
+
+    def save(self, model_dir, step):
+        torch.save(
+            {
+                "target_net": self.target_net.state_dict(),
+                "predictor_net": self.predictor_net.state_dict(),
+                "optim": self.predictor_optim.state_dict(),
+            },
+            "%s/dist_%s.pt" % (model_dir, step),
+        )
+
+    def load(self, model_path):
+        ckpt = torch.load(model_path)
+        self.target_net.load_state_dict(ckpt["target_net"])
+        self.predictor_net.load_state_dict(ckpt["predictor_net"])
+        self.predictor_optim.load_state_dict(ckpt["optim"])

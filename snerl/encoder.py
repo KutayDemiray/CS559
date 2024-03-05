@@ -267,6 +267,8 @@ class MeanEncoder(nn.Module):
         elif render_mode == "rgbd_array":
             self.n_in_channels = 3
 
+        print("obs shape", obs_shape)
+
         self.obs_shape = obs_shape
         assert feature_dim / frame_stack == 63
         self.feature_dim = feature_dim
@@ -488,7 +490,7 @@ def make_encoder(
     log_encoder=False,
     env_name=None,
     exp_type="affordance",  # kutay: "affordance" or "original" (rgb)
-    render_mode="rgb_array",  # kutay: "rgb_array" or "rgbd_array"
+    render_mode="rgbd_array",  # kutay: "rgb_array" or "rgbd_array"
 ):
     assert encoder_type in _AVAILABLE_ENCODERS
     if encoder_type == "nerf":
