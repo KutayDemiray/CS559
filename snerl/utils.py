@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
-import gymnasium as gym
+import gym
 import re
 import os
 import cv2
