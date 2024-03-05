@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
-import gym
+import gymnasium as gym
 import re
 import os
 import cv2
@@ -85,7 +85,7 @@ class ReplayBuffer(Dataset):
         multicam_contrastive=False,
         frame_stack=3,
     ):
-        #print("obs shape", obs_shape)
+        # print("obs shape", obs_shape)
         self.capacity = capacity
         self.batch_size = batch_size
         self.device = device
