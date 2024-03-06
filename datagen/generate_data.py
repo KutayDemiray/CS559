@@ -9,6 +9,9 @@ from metaworld.policies.sawyer_window_open_v2_policy import SawyerWindowOpenV2Po
 from metaworld.policies.sawyer_soccer_v2_policy import SawyerSoccerV2Policy
 from metaworld.policies.sawyer_hammer_v2_policy import SawyerHammerV2Policy
 from metaworld.policies.sawyer_drawer_open_v2_policy import SawyerDrawerOpenV2Policy
+from metaworld.policies.sawyer_button_press_topdown_v2_policy import (
+    SawyerButtonPressTopdownV2Policy,
+)
 import random
 
 import time
@@ -35,6 +38,8 @@ parser.add_argument(
         "hammer-v2",
         "soccer-v2",
         "window-open-v2",
+        "shelf-place-v2",
+        "button-press-topdown-v2",
     ],  # tasks used in snerl
 )
 parser.add_argument(
@@ -82,6 +87,8 @@ elif task_name == "drawer-open-v2":
     policy = SawyerDrawerOpenV2Policy()
 elif task_name == "hammer-v2":
     policy = SawyerHammerV2Policy()
+elif task_name == "button-press-topdown-v2":
+    policy = SawyerButtonPressTopdownV2Policy()
 
 
 def get_poses(cam_positions, cam_rotations):

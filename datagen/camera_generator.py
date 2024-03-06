@@ -33,6 +33,6 @@ with open("./test2.txt", "w") as the_file:
 
         # the_file.write(f'<camera name="CUSTOM{i}" fovy="45" euler="{pitch} 0 {yaw}" pos="{posx} {posy} {posz}"/>\n')
         the_file.write(
-            f'<camera name="CUSTOM{i}" fovy="45" mode="targetbody" target="drawer" pos="{posx} {posy} {posz}"/>\n'
+            f'<camera name="CUSTOM{i}" fovy="45" mode="targetbody" target="buttonbox" pos="{posx} {posy} {posz}"/>\n'
         )
 # np.save("/home/yigit/Metaworld/NERF_Dataset/poses", poses)
